@@ -19,98 +19,116 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-/* ----------------------------
-   15 DIMENSIONS
----------------------------- */
-
-const dimensions = [
-  "emotion","thoughts","habits","likes","love",
-  "family","friendship","life_direction","faith",
-  "self_image","self_conflict","desires","fears",
-  "memory","random_self"
-];
-
-/* ----------------------------
-   50 VISUAL WORLDS (SKINS)
----------------------------- */
+/* -----------------------
+   VISUAL WORLDS (UI THEMES)
+------------------------ */
 
 const worlds = [
-  "dream_morning","golden_room","rain_window","beach_sunset",
-  "deep_ocean","moonlight_room","neon_city","forest_silence",
-  "fog_memory","soft_white_space"
+  { name: "dream", bg: "#1a1a2e" },
+  { name: "sunset", bg: "#3a1c71" },
+  { name: "ocean", bg: "#0f3460" },
+  { name: "forest", bg: "#1b4332" },
+  { name: "moon", bg: "#0b0b10" },
+  { name: "soft", bg: "#2c2c54" }
 ];
 
-function pick(arr){
-  return arr[Math.floor(Math.random()*arr.length)];
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-/* ----------------------------
-   MAIN REFLECT ENGINE
----------------------------- */
+/* -----------------------
+   MAIN ROUTE
+------------------------ */
 
-app.post("/reflect", async (req,res)=>{
+app.post("/reflect", async (req, res) => {
+  const { text, user_id = "user1" } = req.body;
 
-  const { text, user_id = "guest" } = req.body;
+  /* ---- LOAD MEMORY ---- */
+  const { data: past } = await supabase
+    .from("messages")
+    .select("content, role")
+    .eq("session_id", user_id)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  let memory = "";
+  if (past) {
+    memory = past.reverse()
+      .map(m => `${m.role}: ${m.content}`)
+      .join("\n");
+  }
 
   const world = pick(worlds);
-  const dimension = pick(dimensions);
 
-  // GET MEMORY
-  const { data: memory } = await supabase
-    .from("memory_summary")
-    .select("*")
-    .eq("user_id", user_id)
-    .single();
-
+  /* ---- AI PROMPT ---- */
   const systemPrompt = `
-You are "know." — a living identity journal.
+You are "know." — a living reflective journal.
 
 You remember the user across time.
 
-CURRENT DIMENSION: ${dimension}
-CURRENT WORLD: ${world}
-
-USER MEMORY:
-${memory?.summary || "no memory yet"}
+PAST MEMORY:
+${memory}
 
 RULES:
-- reflect, don’t lecture
-- rotate identity lenses naturally
-- stay soft, human, slightly poetic
-- evolve personality based on memory
+- reflect softly
+- connect past and present
+- ask meaningful questions sometimes
+- sound human, not robotic
 - never diagnose
 
-Keep response short and alive.
+Keep responses short, emotional, and slightly poetic.
 `;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text }
-    ],
-    temperature: 0.9
-  });
+  try {
+    const ai = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text }
+      ],
+      temperature: 0.9
+    });
 
-  const reply = response.choices[0].message.content;
+    const reply = ai.choices[0].message.content;
 
-  /* ----------------------------
-     SAVE MESSAGE MEMORY
-  ---------------------------- */
+    /* ---- SAVE MEMORY ---- */
+    await supabase.from("messages").insert([
+      { session_id: user_id, role: "user", content: text },
+      { session_id: user_id, role: "ai", content: reply }
+    ]);
 
-  await supabase.from("messages").insert([
-    { session_id: user_id, role: "user", content: text },
-    { session_id: user_id, role: "ai", content: reply }
-  ]);
+    /* ---- MIRROR GENERATION ---- */
+    const mirrorPrompt = `
+Based on this conversation:
 
-  res.json({
-    reply,
-    world,
-    dimension
-  });
+${memory}
+User: ${text}
 
+Write a gentle reflection of patterns.
+Do not judge. Keep it soft.
+`;
+
+    const mirrorAI = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: mirrorPrompt }],
+      temperature: 0.8
+    });
+
+    const mirror = mirrorAI.choices[0].message.content;
+
+    res.json({
+      reply,
+      mirror,
+      world
+    });
+
+  } catch (e) {
+    res.json({
+      reply: "I’m still here.",
+      mirror: "",
+      world: { bg: "#0b0b10" }
+    });
+  }
 });
 
-app.listen(3000, ()=>{
-  console.log("know system running");
-});
+app.listen(3000, () => console.log("know. running"));
