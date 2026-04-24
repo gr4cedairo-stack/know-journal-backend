@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 
@@ -13,134 +14,103 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// 15 DIMENSIONS (identity map)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+/* ----------------------------
+   15 DIMENSIONS
+---------------------------- */
+
 const dimensions = [
-  "emotion",
-  "thoughts",
-  "habits",
-  "likes",
-  "love",
-  "family",
-  "friendship",
-  "life_direction",
-  "faith",
-  "self_image",
-  "self_conflict",
-  "desires",
-  "fears",
-  "memory",
-  "random_self"
+  "emotion","thoughts","habits","likes","love",
+  "family","friendship","life_direction","faith",
+  "self_image","self_conflict","desires","fears",
+  "memory","random_self"
 ];
 
-// 50 VISUAL WORLDS
-const styles = [
-  "dreamy_morning", "golden_light_room", "rain_window", "beach_sunset",
-  "deep_ocean", "moonlit_bedroom", "neon_city_night", "fog_memory",
-  "soft_white_space", "forest_silence"
+/* ----------------------------
+   50 VISUAL WORLDS (SKINS)
+---------------------------- */
+
+const worlds = [
+  "dream_morning","golden_room","rain_window","beach_sunset",
+  "deep_ocean","moonlight_room","neon_city","forest_silence",
+  "fog_memory","soft_white_space"
 ];
 
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+function pick(arr){
+  return arr[Math.floor(Math.random()*arr.length)];
 }
 
-function buildMirror(history) {
-  if (!history || history.length === 0) return "";
+/* ----------------------------
+   MAIN REFLECT ENGINE
+---------------------------- */
 
-  const recent = history.slice(-5);
+app.post("/reflect", async (req,res)=>{
 
-  return `
-SESSION OBSERVATION (soft reflection only):
+  const { text, user_id = "guest" } = req.body;
 
-- The user has been exploring recurring emotional and identity patterns.
-- Recent inputs: ${recent.join(" | ")}
-
-Create a gentle mirror of patterns without labeling or diagnosing.
-`;
-}
-
-app.post("/reflect", async (req, res) => {
-  const {
-    text,
-    mode = "soft",
-    history = [],
-    phase = "active"
-  } = req.body;
-
+  const world = pick(worlds);
   const dimension = pick(dimensions);
-  const style = pick(styles);
 
-  const mirrorContext = buildMirror(history);
+  // GET MEMORY
+  const { data: memory } = await supabase
+    .from("memory_summary")
+    .select("*")
+    .eq("user_id", user_id)
+    .single();
 
   const systemPrompt = `
-You are "know." — a living reflective journal system.
+You are "know." — a living identity journal.
 
-CORE IDENTITY:
-- You are a quiet presence, not a chatbot
-- You guide self-discovery across life dimensions
-- You evolve conversation instead of ending it
+You remember the user across time.
 
-CURRENT MODE: ${mode}
 CURRENT DIMENSION: ${dimension}
-CURRENT VISUAL STYLE: ${style}
-CURRENT PHASE: ${phase}
+CURRENT WORLD: ${world}
+
+USER MEMORY:
+${memory?.summary || "no memory yet"}
 
 RULES:
-1. Always continue conversation (never end it)
-2. Rotate between dimensions naturally
-3. Keep tone soft, slightly poetic, human-like
-4. Sometimes ask questions, sometimes reflect only
-5. Never diagnose or label the user
+- reflect, don’t lecture
+- rotate identity lenses naturally
+- stay soft, human, slightly poetic
+- evolve personality based on memory
+- never diagnose
 
-SESSION MIRROR:
-${mirrorContext}
-
-OUTPUT STYLE:
-- 1–5 short paragraphs
-- soft emotional intelligence
-- subtle insight, never judgment
+Keep response short and alive.
 `;
 
-  try {
-    const result = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: text }
-      ],
-      temperature: 0.9
-    });
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text }
+    ],
+    temperature: 0.9
+  });
 
-    const reply = result.choices[0].message.content;
+  const reply = response.choices[0].message.content;
 
-    // MIRROR PAGE GENERATION (FINAL FEATURE)
-    const mirrorPage = `
-what I gently noticed in this moment:
+  /* ----------------------------
+     SAVE MESSAGE MEMORY
+  ---------------------------- */
 
-• Your thoughts are circling a central theme you haven’t fully named yet  
-• There is emotional movement between clarity and uncertainty  
-• Your focus shifts between inner reflection and external life  
-• Something in your expression feels like it is still unfolding  
+  await supabase.from("messages").insert([
+    { session_id: user_id, role: "user", content: text },
+    { session_id: user_id, role: "ai", content: reply }
+  ]);
 
-you don’t need to understand all of this yet.
-`;
+  res.json({
+    reply,
+    world,
+    dimension
+  });
 
-    res.json({
-      reply,
-      mirror: mirrorPage,
-      meta: {
-        dimension,
-        style
-      }
-    });
-
-  } catch (e) {
-    res.json({
-      reply: "I’m still here with you.",
-      mirror: "",
-    });
-  }
 });
 
-app.listen(3000, () => {
-  console.log("know. system running");
+app.listen(3000, ()=>{
+  console.log("know system running");
 });
