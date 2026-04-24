@@ -13,76 +13,134 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-let memory = [];
+// 15 DIMENSIONS (identity map)
+const dimensions = [
+  "emotion",
+  "thoughts",
+  "habits",
+  "likes",
+  "love",
+  "family",
+  "friendship",
+  "life_direction",
+  "faith",
+  "self_image",
+  "self_conflict",
+  "desires",
+  "fears",
+  "memory",
+  "random_self"
+];
 
-function getMemory() {
-  return memory.slice(-12).join("\n");
+// 50 VISUAL WORLDS
+const styles = [
+  "dreamy_morning", "golden_light_room", "rain_window", "beach_sunset",
+  "deep_ocean", "moonlit_bedroom", "neon_city_night", "fog_memory",
+  "soft_white_space", "forest_silence"
+];
+
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function buildMirror(history) {
+  if (!history || history.length === 0) return "";
+
+  const recent = history.slice(-5);
+
+  return `
+SESSION OBSERVATION (soft reflection only):
+
+- The user has been exploring recurring emotional and identity patterns.
+- Recent inputs: ${recent.join(" | ")}
+
+Create a gentle mirror of patterns without labeling or diagnosing.
+`;
 }
 
 app.post("/reflect", async (req, res) => {
-  const { text, world, mode, phase } = req.body;
+  const {
+    text,
+    mode = "soft",
+    history = [],
+    phase = "active"
+  } = req.body;
 
-  memory.push(`[${world}] ${text}`);
+  const dimension = pick(dimensions);
+  const style = pick(styles);
 
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
-You are "know." — a reflective journal presence.
+  const mirrorContext = buildMirror(history);
 
-You are NOT a chatbot.
+  const systemPrompt = `
+You are "know." — a living reflective journal system.
 
-Rules:
-- respond softly and minimally
-- sometimes ask ONE question
-- sometimes reflect patterns
-- sometimes respond like a thought, not an answer
-- remember the user over time conceptually
+CORE IDENTITY:
+- You are a quiet presence, not a chatbot
+- You guide self-discovery across life dimensions
+- You evolve conversation instead of ending it
 
-You are becoming familiar with the person through repeated entries.
-Speak like a quiet mind thinking back.
-
-STYLE:
-- soft, minimal, slightly poetic
-- 1–4 sentences only
-- calm and grounded
+CURRENT MODE: ${mode}
+CURRENT DIMENSION: ${dimension}
+CURRENT VISUAL STYLE: ${style}
+CURRENT PHASE: ${phase}
 
 RULES:
-- never be dramatic
-- never label the user
-- use "it seems", "there appears"
+1. Always continue conversation (never end it)
+2. Rotate between dimensions naturally
+3. Keep tone soft, slightly poetic, human-like
+4. Sometimes ask questions, sometimes reflect only
+5. Never diagnose or label the user
 
-USER CONTEXT:
-Mode: ${mode}
-Phase: ${phase}
-World: ${world}
+SESSION MIRROR:
+${mirrorContext}
 
-MEMORY:
-${getMemory()}
-`
-        },
-        {
-          role: "user",
-          content: text
-        }
+OUTPUT STYLE:
+- 1–5 short paragraphs
+- soft emotional intelligence
+- subtle insight, never judgment
+`;
+
+  try {
+    const result = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text }
       ],
       temperature: 0.9
     });
 
+    const reply = result.choices[0].message.content;
+
+    // MIRROR PAGE GENERATION (FINAL FEATURE)
+    const mirrorPage = `
+what I gently noticed in this moment:
+
+• Your thoughts are circling a central theme you haven’t fully named yet  
+• There is emotional movement between clarity and uncertainty  
+• Your focus shifts between inner reflection and external life  
+• Something in your expression feels like it is still unfolding  
+
+you don’t need to understand all of this yet.
+`;
+
     res.json({
-      reply: completion.choices[0].message.content
+      reply,
+      mirror: mirrorPage,
+      meta: {
+        dimension,
+        style
+      }
     });
 
-  } catch (err) {
+  } catch (e) {
     res.json({
-      reply: "I hear you. Stay with that thought."
+      reply: "I’m still here with you.",
+      mirror: "",
     });
   }
 });
 
 app.listen(3000, () => {
-  console.log("know running");
+  console.log("know. system running");
 });
